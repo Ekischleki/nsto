@@ -59,12 +59,11 @@ impl MemoryRegion for DummyMem {
     }
 }
 
-pub struct Memory {
+pub struct Memory<const MEMORY_SIZE: usize> {
     regions: Box<[Box<dyn MemoryRegion>]>,
 }
 
-impl Memory {
-    const MEMORY_SIZE: usize = 0x10000;
+impl<const MEMORY_SIZE: usize> Memory<MEMORY_SIZE> {
     pub fn construct(mut regions: Vec<Box<dyn MemoryRegion>>) -> Result<Self, MemoryError> {
         regions.sort_by_key(|region| region.region_range().start);
         let mut current_i = 0;
@@ -75,7 +74,7 @@ impl Memory {
             }
             current_i = range.end + 1;
         }
-        if current_i != Self::MEMORY_SIZE {
+        if current_i != MEMORY_SIZE {
             return Err(MemoryError::InvalidRegionCoverage);
         }
 

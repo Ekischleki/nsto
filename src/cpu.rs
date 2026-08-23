@@ -37,7 +37,7 @@ impl Registers {
 }
 
 pub struct CPU {
-    mem: Memory,
+    mem: Memory<0x10000>,
     reg: Registers,
     cycle_count: usize,
 }
