@@ -1,4 +1,7 @@
-use crate::memory::{DummyMem, InternalRam, Memory};
+use crate::{
+    memory::{DummyMem, InternalRam, Memory, MemoryRegion},
+    ppu::{PPU, PPUOamDmaRegisterMap, PPURegistersMap},
+};
 
 pub struct Registers {
     a: u8,
@@ -43,6 +46,9 @@ pub struct CPU {
 }
 
 impl CPU {
+    pub fn cycle_count(&self) -> usize {
+        self.cycle_count
+    }
     pub fn new() -> Self {
         let reg = Registers::new();
         let mem = Memory::construct(vec![
@@ -57,13 +63,39 @@ impl CPU {
         }
     }
 
+    pub fn start_with_memory(mem: Memory<0x10000>) -> Self {
+        let mut res = Self {
+            mem,
+            reg: Registers::new(),
+            cycle_count: 0,
+        };
+        res.reset();
+        res
+    }
+
+    //Creates the default cpu memory with the cartridge memory represented at 0x4020-0x10000
+    pub fn with_cartridge_memory(
+        mut mem: Vec<Box<dyn MemoryRegion>>,
+        ppu: &PPU,
+    ) -> Memory<0x10000> {
+        let mut default_mem: Vec<Box<dyn MemoryRegion>> = vec![
+            Box::new(InternalRam::default()),
+            Box::new(PPURegistersMap::new(ppu.reg())),
+            Box::new(DummyMem::new((0x4000..0x4014).into())),
+            Box::new(PPUOamDmaRegisterMap::new(ppu.reg())),
+            Box::new(DummyMem::new((0x4015..0x4020).into())),
+        ];
+        default_mem.append(&mut mem);
+        Memory::construct(default_mem).unwrap()
+    }
+
     pub fn reset(&mut self) {
         self.reg.sp = self.reg.sp.wrapping_sub(3);
         self.reg.pc = self.deref_word_at(0xFFFC);
         self.reg.i = true;
     }
 
-    pub fn read_addr_zp_x(&mut self, arg: u8, cycle: bool) -> u8 {
+    fn read_addr_zp_x(&mut self, arg: u8, cycle: bool) -> u8 {
         let addr = arg.wrapping_add(self.reg.x) as usize;
         let res = self.mem.read(addr);
         if cycle {
@@ -72,7 +104,7 @@ impl CPU {
         res
     }
 
-    pub fn write_addr_zp_x(&mut self, arg: u8, data: u8, cycle: bool) {
+    fn write_addr_zp_x(&mut self, arg: u8, data: u8, cycle: bool) {
         let addr = arg.wrapping_add(self.reg.x) as usize;
         self.mem.write(addr, data);
         if cycle {
@@ -80,7 +112,7 @@ impl CPU {
         }
     }
 
-    pub fn read_addr_zp_y(&mut self, arg: u8, cycle: bool) -> u8 {
+    fn read_addr_zp_y(&mut self, arg: u8, cycle: bool) -> u8 {
         let addr = arg.wrapping_add(self.reg.y) as usize;
         let res = self.mem.read(addr);
         if cycle {
@@ -89,7 +121,7 @@ impl CPU {
         res
     }
 
-    pub fn write_addr_zp_y(&mut self, arg: u8, data: u8, cycle: bool) {
+    fn write_addr_zp_y(&mut self, arg: u8, data: u8, cycle: bool) {
         let addr = arg.wrapping_add(self.reg.y) as usize;
         self.mem.write(addr, data);
         if cycle {
@@ -97,7 +129,7 @@ impl CPU {
         }
     }
 
-    pub fn read_addr_abs_x(&mut self, arg: u16, cycle: bool) -> u8 {
+    fn read_addr_abs_x(&mut self, arg: u16, cycle: bool) -> u8 {
         let addr = arg.wrapping_add(self.reg.x as u16);
         let res = self.mem.read(addr as usize);
         if cycle {
@@ -110,7 +142,7 @@ impl CPU {
         res
     }
 
-    pub fn write_addr_abs_x(&mut self, arg: u16, val: u8, cycle: bool) {
+    fn write_addr_abs_x(&mut self, arg: u16, val: u8, cycle: bool) {
         let addr = arg.wrapping_add(self.reg.x as u16);
         self.mem.write(addr as usize, val);
         if cycle {
@@ -118,7 +150,7 @@ impl CPU {
         }
     }
 
-    pub fn write_addr_abs_y(&mut self, arg: u16, data: u8, cycle: bool) {
+    fn write_addr_abs_y(&mut self, arg: u16, data: u8, cycle: bool) {
         let addr = arg.wrapping_add(self.reg.y as u16);
         self.mem.write(addr as usize, data);
         if cycle {
@@ -126,7 +158,7 @@ impl CPU {
         }
     }
 
-    pub fn read_addr_abs_y(&mut self, arg: u16, cycle: bool) -> u8 {
+    fn read_addr_abs_y(&mut self, arg: u16, cycle: bool) -> u8 {
         let addr = arg.wrapping_add(self.reg.y as u16);
         let res = self.mem.read(addr as usize);
         if cycle {
@@ -150,7 +182,7 @@ impl CPU {
         res
     }
 
-    pub fn read_addr_indr_x(&mut self, arg: u8, cycle: bool) -> u8 {
+    fn read_addr_indr_x(&mut self, arg: u8, cycle: bool) -> u8 {
         let ptr = arg.wrapping_add(self.reg.x);
         let addr = self.deref_word_at_zp(ptr);
         let res = self.mem.read(addr as usize);
@@ -160,7 +192,7 @@ impl CPU {
         res
     }
 
-    pub fn write_addr_indr_x(&mut self, arg: u8, data: u8, cycle: bool) {
+    fn write_addr_indr_x(&mut self, arg: u8, data: u8, cycle: bool) {
         let ptr = arg.wrapping_add(self.reg.x);
         let addr = self.deref_word_at_zp(ptr);
         self.mem.write(addr as usize, data);
@@ -169,7 +201,7 @@ impl CPU {
         }
     }
 
-    pub fn read_addr_indr_y(&mut self, arg: u8, cycle: bool) -> u8 {
+    fn read_addr_indr_y(&mut self, arg: u8, cycle: bool) -> u8 {
         let deref = self.deref_word_at_zp(arg);
         let addr = deref.wrapping_add(self.reg.y as u16);
         let res = self.mem.read(addr as usize);
@@ -182,7 +214,7 @@ impl CPU {
         res
     }
 
-    pub fn write_addr_indr_y(&mut self, arg: u8, data: u8, cycle: bool) {
+    fn write_addr_indr_y(&mut self, arg: u8, data: u8, cycle: bool) {
         let deref = self.deref_word_at_zp(arg);
         let addr = deref.wrapping_add(self.reg.y as u16);
         self.mem.write(addr as usize, data);
@@ -191,24 +223,24 @@ impl CPU {
         }
     }
 
-    pub fn fetch_pc_byte(&mut self) -> u8 {
+    fn fetch_pc_byte(&mut self) -> u8 {
         let res = self.mem.read(self.reg.pc as usize);
         self.reg.pc += 1;
         res
     }
 
-    pub fn fetch_abs_from_pc(&mut self) -> u8 {
+    fn fetch_abs_from_pc(&mut self) -> u8 {
         let addr = self.fetch_pc_word();
         self.mem.read(addr as usize)
     }
 
-    pub fn fetch_pc_word(&mut self) -> u16 {
+    fn fetch_pc_word(&mut self) -> u16 {
         let lo = self.fetch_pc_byte();
         let hi = self.fetch_pc_byte();
         u16::from_le_bytes([lo, hi])
     }
 
-    pub fn set_flags(&mut self, c: bool, z: bool, n: bool, val: u16) {
+    fn set_flags(&mut self, c: bool, z: bool, n: bool, val: u16) {
         if c {
             self.reg.c = val > 0xFF;
         }
@@ -220,7 +252,7 @@ impl CPU {
         }
     }
 
-    pub fn adc(&mut self, mem: u8) {
+    fn adc(&mut self, mem: u8) {
         let res = self.reg.a as u16 + mem as u16 + if self.reg.c { 1 } else { 0 };
         self.set_flags(true, true, true, res);
         let res = (res & 0xFF) as u8;
@@ -228,12 +260,12 @@ impl CPU {
         self.reg.a = res;
     }
 
-    pub fn and(&mut self, mem: u8) {
+    fn and(&mut self, mem: u8) {
         self.reg.a = self.reg.a & mem;
         self.set_flags(false, true, true, self.reg.a as u16);
     }
 
-    pub fn asl(&mut self, value: u8) -> u8 {
+    fn asl(&mut self, value: u8) -> u8 {
         self.reg.c = value & 0x80 != 0;
         let res = value << 1;
         self.reg.z = res == 0;
@@ -241,7 +273,7 @@ impl CPU {
         res
     }
 
-    pub fn lsr(&mut self, value: u8) -> u8 {
+    fn lsr(&mut self, value: u8) -> u8 {
         self.reg.c = value & 0x01 != 0;
         let res = value >> 1;
         self.reg.z = res == 0;
@@ -249,7 +281,7 @@ impl CPU {
         res
     }
 
-    pub fn ror(&mut self, value: u8) -> u8 {
+    fn ror(&mut self, value: u8) -> u8 {
         self.reg.c = value & 0x01 != 0;
         let res = value.rotate_right(1);
         self.reg.z = res == 0;
@@ -257,7 +289,7 @@ impl CPU {
         res
     }
 
-    pub fn rol(&mut self, value: u8) -> u8 {
+    fn rol(&mut self, value: u8) -> u8 {
         self.reg.c = value & 0x80 != 0;
         let res = value.rotate_left(1);
         self.reg.z = res == 0;
@@ -265,77 +297,77 @@ impl CPU {
         res
     }
 
-    pub fn dec(&mut self, value: u8) -> u8 {
+    fn dec(&mut self, value: u8) -> u8 {
         let res = value.wrapping_sub(1);
         self.reg.z = res == 0;
         self.reg.n = res & 0x80 != 0;
         res
     }
 
-    pub fn inc(&mut self, value: u8) -> u8 {
+    fn inc(&mut self, value: u8) -> u8 {
         let res = value.wrapping_add(1);
         self.reg.z = res == 0;
         self.reg.n = res & 0x80 != 0;
         res
     }
 
-    pub fn bit(&mut self, mem: u8) {
+    fn bit(&mut self, mem: u8) {
         let v = self.reg.a & mem;
         self.reg.z = v == 0;
         self.reg.n = v & 0x80 != 0;
         self.reg.v = v & 0x40 != 0;
     }
 
-    pub fn cmp(&mut self, mem: u8) {
+    fn cmp(&mut self, mem: u8) {
         self.reg.c = self.reg.a >= mem;
         self.reg.z = self.reg.a == mem;
         self.reg.n = self.reg.a.wrapping_sub(mem) & 0x80 != 0;
     }
 
-    pub fn cpx(&mut self, mem: u8) {
+    fn cpx(&mut self, mem: u8) {
         self.reg.c = self.reg.x >= mem;
         self.reg.z = self.reg.x == mem;
         self.reg.n = self.reg.x.wrapping_sub(mem) & 0x80 != 0;
     }
 
-    pub fn cpy(&mut self, mem: u8) {
+    fn cpy(&mut self, mem: u8) {
         self.reg.c = self.reg.y >= mem;
         self.reg.z = self.reg.y == mem;
         self.reg.n = self.reg.y.wrapping_sub(mem) & 0x80 != 0;
     }
 
-    pub fn eor(&mut self, mem: u8) {
+    fn eor(&mut self, mem: u8) {
         let res = self.reg.a ^ mem;
         self.reg.z = res == 0;
         self.reg.n = res & 0x80 != 0;
         self.reg.a = res;
     }
 
-    pub fn lda(&mut self, mem: u8) {
+    fn lda(&mut self, mem: u8) {
         self.reg.z = mem == 0;
         self.reg.n = mem & 0x80 != 0;
         self.reg.a = mem;
     }
 
-    pub fn ldx(&mut self, mem: u8) {
+    fn ldx(&mut self, mem: u8) {
         self.reg.z = mem == 0;
         self.reg.n = mem & 0x80 != 0;
         self.reg.x = mem;
     }
 
-    pub fn ldy(&mut self, mem: u8) {
+    fn ldy(&mut self, mem: u8) {
         self.reg.z = mem == 0;
         self.reg.n = mem & 0x80 != 0;
         self.reg.y = mem;
     }
 
-    pub fn ora(&mut self, mem: u8) {
+    fn ora(&mut self, mem: u8) {
         self.reg.a = self.reg.a | mem;
         self.reg.z = self.reg.a == 0;
         self.reg.n = self.reg.a & 0x80 != 0;
     }
 
-    pub fn sbc(&mut self, mem: u8) {
+    fn sbc(&mut self, mem: u8) {
         let res = self.reg.a as i16 - mem as i16 - if self.reg.c { 0 } else { 1 };
         self.reg.c = res >= 0;
         let res = (res & 0x00FF) as u8;
@@ -345,19 +377,19 @@ impl CPU {
         self.reg.a = res;
     }
 
-    pub fn push(&mut self, mem: u8) {
+    fn push(&mut self, mem: u8) {
         let sp = self.reg.sp as usize + 0x100;
         self.mem.write(sp, mem);
         self.reg.sp = self.reg.sp.wrapping_sub(1);
     }
 
-    pub fn pop(&mut self) -> u8 {
+    fn pop(&mut self) -> u8 {
         self.reg.sp = self.reg.sp.wrapping_add(1);
         let sp = self.reg.sp as usize + 0x100;
         self.mem.read(sp)
     }
 
-    pub fn branch_if_condition(&mut self, v: bool) {
+    fn branch_if_condition(&mut self, v: bool) {
         let rel = self.fetch_pc_byte().cast_signed() as i16;
         let dest = self.reg.pc.wrapping_add_signed(rel);
         self.cycle_count += 2;
@@ -371,18 +403,18 @@ impl CPU {
         self.reg.pc = dest;
     }
 
-    pub fn push_pc_to_stack(&mut self) {
+    fn push_pc_to_stack(&mut self) {
         self.push((self.reg.pc >> 8) as u8);
         self.push((self.reg.pc & 0xFF) as u8);
     }
 
-    pub fn pop_pc_from_stack(&mut self) {
+    fn pop_pc_from_stack(&mut self) {
         let lo = self.pop();
         let hi = self.pop();
         self.reg.pc = u16::from_le_bytes([lo, hi]);
     }
 
-    pub fn pack_flags(&self, b5: bool, b4: bool) -> u8 {
+    fn pack_flags(&self, b5: bool, b4: bool) -> u8 {
         let mut packed = 0b00110000;
         if self.reg.n {
             packed |= 0x80;
@@ -411,7 +443,7 @@ impl CPU {
         packed
     }
 
-    pub fn apply_packed(&mut self, packed: u8, sched_i: bool) {
+    fn apply_packed(&mut self, packed: u8, sched_i: bool) {
         self.reg.n = packed & 0x80 != 0;
         self.reg.v = packed & 0x40 != 0;
         self.reg.d = packed & 0x08 != 0;
@@ -685,6 +717,7 @@ impl CPU {
                 let addr = self.fetch_pc_word() as usize;
                 let mem = self.mem.read(addr);
                 self.cmp(mem);
+                self.cycle_count += 4;
             }
             //Abs, X
             0xDD => {
@@ -722,14 +755,14 @@ impl CPU {
                 let addr = self.fetch_pc_byte() as usize;
                 let mem = self.mem.read(addr);
                 self.cpx(mem);
-                self.cycle_count += 2;
+                self.cycle_count += 3;
             }
             //ABS
             0xEC => {
                 let addr = self.fetch_pc_word() as usize;
                 let mem = self.mem.read(addr);
                 self.cpx(mem);
-                self.cycle_count += 3;
+                self.cycle_count += 4;
             }
             //----CPY
             //Im
@@ -743,14 +776,14 @@ impl CPU {
                 let addr = self.fetch_pc_byte() as usize;
                 let mem = self.mem.read(addr);
                 self.cpy(mem);
-                self.cycle_count += 2;
+                self.cycle_count += 3;
             }
             //ABS
             0xCC => {
                 let addr = self.fetch_pc_word() as usize;
                 let mem = self.mem.read(addr);
                 self.cpy(mem);
-                self.cycle_count += 3;
+                self.cycle_count += 4;
             }
             //----DEC
             //ZP
@@ -824,6 +857,7 @@ impl CPU {
                 let addr = self.fetch_pc_word() as usize;
                 let mem = self.mem.read(addr);
                 self.eor(mem);
+                self.cycle_count += 4;
             }
             //Abs, X
             0x5D => {
@@ -920,6 +954,7 @@ impl CPU {
                 let addr = self.fetch_pc_word();
                 self.push_pc_to_stack();
                 self.reg.pc = addr;
+                self.cycle_count += 6;
             }
             //----LDA
             //Im
@@ -946,6 +981,7 @@ impl CPU {
                 let addr = self.fetch_pc_word() as usize;
                 let mem = self.mem.read(addr);
                 self.lda(mem);
+                self.cycle_count += 4;
             }
             //Abs, X
             0xBD => {
@@ -996,6 +1032,7 @@ impl CPU {
                 let addr = self.fetch_pc_word() as usize;
                 let mem = self.mem.read(addr);
                 self.ldx(mem);
+                self.cycle_count += 4;
             }
             //Abs, Y
             0xBE => {
@@ -1028,6 +1065,7 @@ impl CPU {
                 let addr = self.fetch_pc_word() as usize;
                 let mem = self.mem.read(addr);
                 self.ldy(mem);
+                self.cycle_count += 4;
             }
             //Abs, X
             0xBC => {
@@ -1382,36 +1420,50 @@ impl CPU {
                 self.reg.x = self.reg.a;
                 self.reg.z = self.reg.x == 0;
                 self.reg.n = self.reg.x & 0x80 != 0;
+                self.cycle_count += 2;
             }
             //----TAY
             0xA8 => {
                 self.reg.y = self.reg.a;
                 self.reg.z = self.reg.y == 0;
                 self.reg.n = self.reg.y & 0x80 != 0;
+                self.cycle_count += 2;
             }
             //----TSX
             0xBA => {
                 self.reg.x = self.reg.sp;
                 self.reg.z = self.reg.x == 0;
                 self.reg.n = self.reg.x & 0x80 != 0;
+                self.cycle_count += 2;
             }
             //----TXA
             0x8A => {
                 self.reg.a = self.reg.x;
                 self.reg.z = self.reg.a == 0;
                 self.reg.n = self.reg.a & 0x80 != 0;
+                self.cycle_count += 2;
             }
             //----TXS
             0x9A => {
                 self.reg.sp = self.reg.x;
+                self.cycle_count += 2;
             }
             //----TYA
             0x98 => {
                 self.reg.a = self.reg.y;
                 self.reg.z = self.reg.a == 0;
                 self.reg.n = self.reg.a & 0x80 != 0;
+                self.cycle_count += 2;
             }
             _ => todo!("Unimplemented instruction"),
         }
+    }
+
+    pub fn mem_mut(&mut self) -> &mut Memory<0x10000> {
+        &mut self.mem
+    }
+
+    pub fn cycle_count_mut(&mut self) -> &mut usize {
+        &mut self.cycle_count
     }
 }
