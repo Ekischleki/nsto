@@ -1,6 +1,11 @@
 use std::{io::Read, iter::Map};
 
-use crate::memory::{Memory, MemoryRegion};
+use crate::{
+    cpu::CPU,
+    memory::{DummyMem, Memory, MemoryRegion},
+    memory_regions::{Rom, RwRam},
+    ppu::PPU,
+};
 
 pub struct Cartridge {
     prg_rom: Vec<PrgRom>,
@@ -12,12 +17,61 @@ pub struct Cartridge {
 }
 
 impl Cartridge {
-    pub fn create_mem() {}
+    pub fn create_devices(self) -> NesDevices {
+        match &self.mapper {
+            Mapper::NROM => self.create_devices_nrom(),
+        }
+    }
+
+    fn create_devices_nrom(self) -> NesDevices {
+        assert!(
+            self.prg_rom.len() <= 2,
+            "Prg rom is bigger than mappable cpu memory region."
+        );
+        assert_ne!(self.prg_rom.len(), 0);
+        let mut cpu_region: Vec<Box<dyn MemoryRegion>> = vec![
+            Box::new(DummyMem::new((0x4020..0x6000).into())),
+            Box::new(RwRam::<0x2000>::with_mirrored_width(0x6000, 0x2000)),
+        ];
+        if self.prg_rom.len() == 1 {
+            cpu_region.push(Box::new(Rom::with_mirrored_width(
+                0x8000,
+                0x8000,
+                self.prg_rom[0].data,
+            )));
+        } else {
+            cpu_region.push(Box::new(Rom::with_mirrored_width(
+                0x8000,
+                0x4000,
+                self.prg_rom[0].data,
+            )));
+            cpu_region.push(Box::new(Rom::with_mirrored_width(
+                0xC000,
+                0x4000,
+                self.prg_rom[1].data,
+            )));
+        }
+
+        let mut ppu_region: Vec<Box<dyn MemoryRegion>> = vec![];
+        if let ChrRomType::ChrRom(r) = self.chr_rom {
+            assert_eq!(r.len(), 1);
+            ppu_region.push(Box::new(Rom::with_mirrored_width(0, 0x2000, r[0].data)));
+        }
+
+        let ppu_mem = PPU::with_cartridge_memory(ppu_region, self.nametable_mirroring);
+
+        let ppu = PPU::start_with_memory(ppu_mem);
+
+        let cpu_mem = CPU::with_cartridge_memory(cpu_region, &ppu);
+        let cpu = CPU::start_with_memory(cpu_mem);
+
+        NesDevices { cpu, ppu }
+    }
 }
 
-pub struct RomMem {
-    cpu: Memory<0x10000>,
-    ppu: Memory<0x4000>,
+pub struct NesDevices {
+    pub cpu: CPU,
+    pub ppu: PPU,
 }
 
 #[repr(u8)]
@@ -49,27 +103,22 @@ pub enum ChrRomType {
 
 impl Cartridge {
     pub fn from_ines<S: Read>(s: &mut S) -> Self {
-        let mut magic_number = [0; 4];
-        s.read_exact(&mut magic_number).unwrap();
-        if &magic_number != b"NES\x1A" {
+        let mut header = [0; 16];
+        s.read_exact(&mut header).unwrap();
+
+        if &header[0..4] != b"NES\x1A" {
             todo!()
         }
-        let mut prg_rom_size = [0; 1];
-        s.read_exact(&mut prg_rom_size).unwrap();
-        let prg_rom_banks = prg_rom_size[0];
 
-        let mut chr_rom_size = [0; 1];
-        s.read_exact(&mut chr_rom_size).unwrap();
-        let chr_rom_banks = chr_rom_size[0];
+        let prg_rom_banks = header[4];
 
-        let mut flags = [0; 5];
-        s.read_exact(&mut flags).unwrap();
+        let chr_rom_banks = header[5];
 
-        let flag_6 = flags[0];
-        let flag_7 = flags[1];
-        let prg_ram_size = flags[2];
-        let flag_9 = flags[3];
-        let flag_10 = flags[4];
+        let flag_6 = header[6];
+        let flag_7 = header[7];
+        let prg_ram_size = header[8];
+        let flag_9 = header[9];
+        let flag_10 = header[10];
 
         let mapper = (flag_6 >> 4) | (flag_7 & 0xF0);
         let nametable_mirroring = if flag_6 & 0x01 == 0 {
@@ -94,11 +143,7 @@ impl Cartridge {
         //We ignore Vs Unisystem and PlayChoice-10 for now.
         let prg_ram_size = prg_ram_size as usize * 0x2000;
 
-        let mut padding = [0; 4];
-
-        s.read_exact(&mut padding).unwrap();
-
-        if padding != [0, 0, 0, 0] {
+        if header[12..16] != [0, 0, 0, 0] {
             println!("Warn: Padding is not zeroed.");
         }
 
