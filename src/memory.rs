@@ -61,39 +61,36 @@ impl MemoryRegion for DummyMem {
 
 pub struct Memory<const MEMORY_SIZE: usize> {
     regions: Box<[Box<dyn MemoryRegion>]>,
+    map: [usize; MEMORY_SIZE],
 }
 
 impl<const MEMORY_SIZE: usize> Memory<MEMORY_SIZE> {
     pub fn construct(mut regions: Vec<Box<dyn MemoryRegion>>) -> Result<Self, MemoryError> {
+        let mut map = [0_usize; MEMORY_SIZE];
         regions.sort_by_key(|region| region.region_range().start);
         let mut current_i = 0;
-        for region in &regions {
+        for (region_idx, region) in regions.iter().enumerate() {
             let range = region.region_range();
+            for i in range {
+                map[i] = region_idx;
+            }
             if range.start != current_i {
                 return Err(MemoryError::InvalidRegionCoverage);
             }
-            current_i = range.end + 1;
+            current_i = range.end;
         }
         if current_i != MEMORY_SIZE {
             return Err(MemoryError::InvalidRegionCoverage);
         }
 
         Ok(Self {
+            map,
             regions: regions.into_boxed_slice(),
         })
     }
 
     fn find_region_idx_of<'a>(&self, idx: usize) -> usize {
-        let upper_bound = self.regions.len();
-        let lower_bound = 0;
-
-        loop {
-            let query = lower_bound + ((upper_bound - lower_bound) / 2);
-            let range = self.regions[query].region_range();
-            if range.contains(&idx) {
-                return query;
-            }
-        }
+        self.map[idx] as usize
     }
 
     pub fn read(&mut self, addr: usize) -> u8 {
