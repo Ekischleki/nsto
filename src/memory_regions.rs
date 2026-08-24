@@ -41,9 +41,13 @@ pub struct Rom<const PHYSICAL_SIZE: usize> {
 }
 
 impl<const PHYSICAL_SIZE: usize> Rom<PHYSICAL_SIZE> {
-    pub fn with_mirrored_width(start: usize, mapped_width: usize) -> Self {
+    pub fn with_mirrored_width(
+        start: usize,
+        mapped_width: usize,
+        mem: [u8; PHYSICAL_SIZE],
+    ) -> Self {
         Self {
-            mem: [0; PHYSICAL_SIZE],
+            mem,
             start,
             mapped_width,
         }
