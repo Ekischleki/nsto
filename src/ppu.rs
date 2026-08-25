@@ -40,6 +40,16 @@ impl PPURegisters {
             self.ppustatus ^= 0x80;
         }
     }
+    pub fn set_sprt_overflow_flag(&mut self, v: bool) {
+        if self.sprite_overflow_flag() != v {
+            self.ppustatus ^= 0x20;
+        }
+    }
+    pub fn set_sprt_hit_flag(&mut self, v: bool) {
+        if self.sprite_hit_flag() != v {
+            self.ppustatus ^= 0x40;
+        }
+    }
     pub fn base_name_addr(&self) -> usize {
         (self.ppuctrl & 0x03) as usize
     }
@@ -118,6 +128,12 @@ impl PPURegisters {
     pub fn vblank_flag(&self) -> bool {
         self.ppustatus & 0x80 != 0
     }
+    pub fn sprite_hit_flag(&self) -> bool {
+        self.ppustatus & 0x40 != 0
+    }
+    pub fn sprite_overflow_flag(&self) -> bool {
+        self.ppustatus & 0x20 != 0
+    }
 }
 
 const DEFAULT_PALETTE: &[u8] = include_bytes!("../2C02G_U_wiki.pal");
@@ -144,6 +160,7 @@ pub struct PPU {
     palette_mapping: [u32; 64],
     monitor: [u32; 256 * 240],
     oam: [u8; 256],
+    sprite_list: Vec<usize>,
 }
 
 impl PPU {
@@ -177,6 +194,7 @@ impl PPU {
             palette_mapping: to_palette(DEFAULT_PALETTE[..0xC0].try_into().unwrap()),
             monitor: [0; 256 * 240],
             oam: [0; 256],
+            sprite_list: Vec::with_capacity(8),
         }
     }
 
@@ -248,19 +266,89 @@ impl PPU {
         self.get_color(color_idx as usize, palette_idx, true)
     }
 
+    ///Returns the sprites' color (transparent otherwise) and whether the sprite was sprite 0
+    fn get_sprite_pixel(&mut self, behind_background: bool) -> (u32, bool) {
+        let x_min = self.dot;
+        let x_max = self.dot + 8;
+        let mut sprite_0 = false;
+        let mut render_color = 0;
+        for i in (0..8).rev() {
+            let sprite_idx = self.sprite_list[i];
+            let sprite_y = self.oam[sprite_idx * 4] as usize;
+            let sprite_tile = self.oam[sprite_idx * 4 + 1];
+            let sprite_attr = self.oam[sprite_idx * 4 + 2];
+            let sprite_x = self.oam[sprite_idx * 4 + 3] as usize;
+
+            if !(x_min..x_max).contains(&sprite_x) {
+                continue;
+            }
+            let sprite_behind_background = sprite_attr & 0x20 != 0;
+            if sprite_behind_background != behind_background {
+                continue;
+            }
+            let tile_row = sprite_y + 1 - self.line;
+            let tile_col = sprite_x - self.dot;
+            let pattern_addr =
+                self.reg.borrow().sprite_pattern_addr() + (sprite_tile as usize) * 16;
+
+            let pattern_lo = self.mem.read(pattern_addr + tile_row);
+            let pattern_hi = self.mem.read(pattern_addr + tile_row + 8);
+
+            let color_idx =
+                (pattern_lo >> tile_col) & 0x01 | (((pattern_hi >> tile_col) & 0x01) << 1);
+            let palette_idx = sprite_attr & 0x03;
+
+            let color = self.get_color(color_idx as usize, palette_idx as usize, false);
+
+            if color & 0xFF000000 == 0 {
+                continue;
+            }
+
+            render_color = color;
+            //Sprite 0 should always be last (since the rev) and thus not be overwritten
+            sprite_0 = sprite_idx == 0;
+        }
+
+        return (render_color, sprite_0);
+    }
+
     fn get_base_background_color(&mut self) -> u32 {
         let color_index = (self.mem.read(0x3F00) & 0x3) as usize;
         self.palette_mapping[color_index]
     }
 
     fn get_pixel(&mut self) -> u32 {
+        let mut pixel = self.get_base_background_color();
+        let mut background_opaque = false;
         if self.reg.borrow().render_bg() {
             let background_pixel = self.get_bg_pixel();
             if (background_pixel & 0xFF000000) != 0 {
-                return background_pixel;
+                pixel = background_pixel;
+                background_opaque = true;
             }
         }
-        return self.get_base_background_color();
+        let render_sprt = self.reg.borrow().render_sprt();
+        if render_sprt {
+            let (low_priority_pixel, sprite_0) = self.get_sprite_pixel(true);
+            if low_priority_pixel & 0xFF000000 != 0 {
+                //Bug with nes means that sprite 0 collision is not detected on dot 255 of rendering
+                if sprite_0 && background_opaque && self.dot < 255 {
+                    self.reg.borrow_mut().set_sprt_hit_flag(true);
+                }
+                if !background_opaque {
+                    pixel = low_priority_pixel;
+                }
+            }
+            let (high_priority_pixel, sprite_0) = self.get_sprite_pixel(false);
+            if high_priority_pixel & 0xFF000000 != 0 {
+                if sprite_0 && background_opaque && self.dot < 255 {
+                    self.reg.borrow_mut().set_sprt_hit_flag(true);
+                }
+                pixel = high_priority_pixel
+            }
+        }
+
+        pixel
     }
 
     fn draw_pixel(&mut self) {
@@ -286,13 +374,24 @@ impl PPU {
         reg.set_vblank_flag(true);
     }
 
+    pub fn drawing(&self) -> bool {
+        self.line < 240 && self.dot < 256
+    }
+
+    pub fn finished_frame(&self) -> bool {
+        self.line > 240
+    }
+
     pub fn clock(&mut self) {
-        if self.line < 240 && self.dot < 256 {
+        if self.line < 240 && self.dot == 0 {
+            self.gen_sprite_list();
+        }
+        if self.drawing() {
             self.draw_pixel();
         }
 
         if self.line == 241 && self.dot == 1 {
-            self.nmi = true;
+            self.vblank_start();
         }
 
         self.advance_monitor();
@@ -310,6 +409,37 @@ impl PPU {
 
     pub fn oam_mut(&mut self) -> &mut [u8; 256] {
         &mut self.oam
+    }
+
+    fn gen_sprite_list(&mut self) {
+        //This is intentionally bugged
+        let sprite_height = if self.reg.borrow().long_sprites() {
+            todo!()
+        } else {
+            8
+        };
+        self.sprite_list.clear();
+        let min_sprite_y = self.line;
+        let max_sprite_y = min_sprite_y + sprite_height;
+        let mut overflow_m = 0;
+        for i in 0..64 {
+            let idx = i * 4;
+            let sprite_y = self.oam[idx + overflow_m] as usize;
+            if (min_sprite_y..max_sprite_y).contains(&(sprite_y + 1)) {
+                if self.sprite_list.len() == 8 {
+                    self.reg.borrow_mut().set_sprt_overflow_flag(true);
+                    continue;
+                }
+                self.sprite_list.push(idx);
+            }
+            if self.sprite_list.len() == 8 {
+                overflow_m = (overflow_m + 1) % 4;
+            }
+        }
+    }
+
+    pub fn monitor(&self) -> [u32; 256 * 240] {
+        self.monitor
     }
 }
 
@@ -437,7 +567,7 @@ impl MemoryRegion for PPURegistersMap {
     fn read(&mut self, rel_idx: usize) -> u8 {
         match Self::justify_idx(rel_idx) {
             0x0002 => {
-                let mut reg = self.reg.borrow_mut();
+                let mut reg: std::cell::RefMut<'_, PPURegisters> = self.reg.borrow_mut();
                 let res = reg.ppustatus;
                 reg.w = false;
                 reg.set_vblank_flag(false);

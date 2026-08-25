@@ -415,7 +415,7 @@ impl CPU {
     }
 
     fn pack_flags(&self, b5: bool, b4: bool) -> u8 {
-        let mut packed = 0b00110000;
+        let mut packed = 0b00000000;
         if self.reg.n {
             packed |= 0x80;
         }
@@ -1273,7 +1273,7 @@ impl CPU {
             //----RTS
             0x60 => {
                 self.pop_pc_from_stack();
-                self.reg.pc += 1;
+                //self.reg.pc += 1;
                 self.cycle_count += 6;
             }
             //--- SBC
