@@ -212,10 +212,9 @@ impl PPU {
             //Transparent
             return 0;
         }
-        let pallet_addr = if background { 0x3F00 } else { 0x3F10 } + palette_idx;
+        let pallet_addr = if background { 0x3F00 } else { 0x3F10 } + palette_idx * 4 + color_idx;
 
-        let color =
-            self.palette_mapping[(self.mem.read(pallet_addr + palette_idx) & 0x3F) as usize];
+        let color = self.palette_mapping[(self.mem.read(pallet_addr) & 0x3F) as usize];
         color
     }
 
@@ -550,7 +549,7 @@ impl MemoryRegion for PPURegistersMap {
             0x0006 => {
                 let mut reg = self.reg.borrow_mut();
                 if let Some(hi) = reg.t.take() {
-                    reg.ppuaddr = ((hi as u16) << 8) | (data as u16);
+                    reg.ppuaddr = (((hi as u16) << 8) | (data as u16)) & 0x3FFF;
                 } else {
                     reg.t = Some(data);
                 }
@@ -568,8 +567,17 @@ impl MemoryRegion for PPURegistersMap {
                 reg.set_vblank_flag(false);
                 res
             }
-            0x0004 => self.reg.borrow().oamdata,
-            0x0007 => self.reg.borrow().ppudata,
+            0x0004 => {
+                let mut reg = self.reg.borrow_mut();
+
+                reg.oamaddr = reg.oamaddr.wrapping_add(1);
+                reg.oamdata
+            }
+            0x0007 => {
+                let mut reg = self.reg.borrow_mut();
+                reg.cpu_access_ppudata();
+                reg.ppudata
+            }
             _ => 0,
         }
     }
