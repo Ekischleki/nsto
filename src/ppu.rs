@@ -20,7 +20,7 @@ pub struct PPURegisters {
     wrote_ppudata: Option<u16>,
     oamdma: u8,
     write_oamdma: bool,
-    w: bool,
+    t: Option<u8>,
 }
 
 impl PPURegisters {
@@ -253,7 +253,7 @@ impl PPU {
         let pattern_addr = self.reg.borrow().bg_pattern_addr() + (pattern_idx as usize) * 16;
 
         let row = position_y % 8;
-        let column = position_x % 8;
+        let column = 7 - (position_x % 8);
 
         let pattern_lo = self.mem.read(pattern_addr + row);
         let pattern_hi = self.mem.read(pattern_addr + row + 8);
@@ -272,7 +272,7 @@ impl PPU {
         let x_max = self.dot + 8;
         let mut sprite_0 = false;
         let mut render_color = 0;
-        for i in (0..8).rev() {
+        for i in (0..self.sprite_list.len()).rev() {
             let sprite_idx = self.sprite_list[i];
             let sprite_y = self.oam[sprite_idx * 4] as usize;
             let sprite_tile = self.oam[sprite_idx * 4 + 1];
@@ -383,6 +383,8 @@ impl PPU {
     }
 
     pub fn clock(&mut self) {
+        self.check_registers();
+
         if self.line < 240 && self.dot == 0 {
             self.gen_sprite_list();
         }
@@ -539,26 +541,19 @@ impl MemoryRegion for PPURegistersMap {
             }
             0x0005 => {
                 let mut reg = self.reg.borrow_mut();
-                if reg.w {
-                    reg.ppuscroll &= 0x00FF;
-                    reg.ppuscroll |= (data as u16) << 8;
+                if let Some(hi) = reg.t.take() {
+                    reg.ppuscroll = ((hi as u16) << 8) | (data as u16);
                 } else {
-                    reg.ppuscroll &= 0xFF00;
-                    reg.ppuscroll |= data as u16;
+                    reg.t = Some(data);
                 }
-                reg.w = !reg.w;
             }
             0x0006 => {
                 let mut reg = self.reg.borrow_mut();
-                if reg.w {
-                    reg.ppuaddr &= 0x00FF;
-                    reg.ppuaddr |= (data as u16) << 8;
+                if let Some(hi) = reg.t.take() {
+                    reg.ppuaddr = ((hi as u16) << 8) | (data as u16);
                 } else {
-                    reg.ppuaddr &= 0xFF00;
-                    reg.ppuaddr |= data as u16;
+                    reg.t = Some(data);
                 }
-                //Shared state with ppuscroll is intended
-                reg.w = !reg.w;
             }
             _ => {}
         }
@@ -569,7 +564,7 @@ impl MemoryRegion for PPURegistersMap {
             0x0002 => {
                 let mut reg: std::cell::RefMut<'_, PPURegisters> = self.reg.borrow_mut();
                 let res = reg.ppustatus;
-                reg.w = false;
+                reg.t = None;
                 reg.set_vblank_flag(false);
                 res
             }

@@ -53,7 +53,7 @@ impl UIEngine {
         for event in self.sdl.event_pump().unwrap().poll_iter() {
             match event {
                 Event::Quit { timestamp } => {
-                    panic!()
+                    panic!("Quit")
                 }
                 _ => {}
             }
@@ -79,14 +79,12 @@ impl Nes {
     }
 
     pub fn run(&mut self) {
+        println!("Running emulator!");
         //This is helpful to set up ppu registers and within the 2 cycle clock desync window
         self.ppu.clock();
         //Optionally add up to 2 cycles of ppu clock desync
         let mut wait_for_next_frame = true;
         loop {
-            if self.cpu.cycle_count() > 118960 {
-                println!("Oh no");
-            }
             self.cpu.execute_instruction();
             let oamdma_poll = self.ppu.reg().borrow_mut().poll_write_oamdma();
             if let Some(oamdma) = oamdma_poll {
