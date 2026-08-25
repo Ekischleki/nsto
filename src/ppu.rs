@@ -499,11 +499,15 @@ impl MemoryRegion for NametableMemory {
 
 pub struct PPURegistersMap {
     reg: Rc<RefCell<PPURegisters>>,
+    ppu_data_buffer: u8,
 }
 
 impl PPURegistersMap {
     pub fn new(reg: Rc<RefCell<PPURegisters>>) -> Self {
-        Self { reg }
+        Self {
+            reg,
+            ppu_data_buffer: 0,
+        }
     }
     fn justify_idx(idx: usize) -> usize {
         idx % 8
@@ -576,7 +580,9 @@ impl MemoryRegion for PPURegistersMap {
             0x0007 => {
                 let mut reg = self.reg.borrow_mut();
                 reg.cpu_access_ppudata();
-                reg.ppudata
+                let old_buffer = self.ppu_data_buffer;
+                self.ppu_data_buffer = reg.ppudata;
+                old_buffer
             }
             _ => 0,
         }
