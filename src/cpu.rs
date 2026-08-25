@@ -253,6 +253,7 @@ impl CPU {
     }
 
     fn adc(&mut self, mem: u8) {
+        println!("adc {mem}");
         let res = self.reg.a as u16 + mem as u16 + if self.reg.c { 1 } else { 0 };
         self.set_flags(true, true, true, res);
         let res = (res & 0xFF) as u8;
@@ -261,11 +262,13 @@ impl CPU {
     }
 
     fn and(&mut self, mem: u8) {
+        println!("and {mem}");
         self.reg.a = self.reg.a & mem;
         self.set_flags(false, true, true, self.reg.a as u16);
     }
 
     fn asl(&mut self, value: u8) -> u8 {
+        println!("asl {value}");
         self.reg.c = value & 0x80 != 0;
         let res = value << 1;
         self.reg.z = res == 0;
@@ -274,6 +277,7 @@ impl CPU {
     }
 
     fn lsr(&mut self, value: u8) -> u8 {
+        println!("lsr {value}");
         self.reg.c = value & 0x01 != 0;
         let res = value >> 1;
         self.reg.z = res == 0;
@@ -282,6 +286,7 @@ impl CPU {
     }
 
     fn ror(&mut self, value: u8) -> u8 {
+        println!("ror {value}");
         self.reg.c = value & 0x01 != 0;
         let res = value.rotate_right(1);
         self.reg.z = res == 0;
@@ -290,6 +295,7 @@ impl CPU {
     }
 
     fn rol(&mut self, value: u8) -> u8 {
+        println!("rol {value}");
         self.reg.c = value & 0x80 != 0;
         let res = value.rotate_left(1);
         self.reg.z = res == 0;
@@ -298,6 +304,7 @@ impl CPU {
     }
 
     fn dec(&mut self, value: u8) -> u8 {
+        println!("dec {value}");
         let res = value.wrapping_sub(1);
         self.reg.z = res == 0;
         self.reg.n = res & 0x80 != 0;
@@ -305,6 +312,7 @@ impl CPU {
     }
 
     fn inc(&mut self, value: u8) -> u8 {
+        println!("inc {value}");
         let res = value.wrapping_add(1);
         self.reg.z = res == 0;
         self.reg.n = res & 0x80 != 0;
@@ -312,6 +320,7 @@ impl CPU {
     }
 
     fn bit(&mut self, mem: u8) {
+        println!("bit {mem}");
         let v = self.reg.a & mem;
         self.reg.z = v == 0;
         self.reg.n = v & 0x80 != 0;
@@ -319,24 +328,28 @@ impl CPU {
     }
 
     fn cmp(&mut self, mem: u8) {
+        println!("cmp {mem}");
         self.reg.c = self.reg.a >= mem;
         self.reg.z = self.reg.a == mem;
         self.reg.n = self.reg.a.wrapping_sub(mem) & 0x80 != 0;
     }
 
     fn cpx(&mut self, mem: u8) {
+        println!("cpx {mem}");
         self.reg.c = self.reg.x >= mem;
         self.reg.z = self.reg.x == mem;
         self.reg.n = self.reg.x.wrapping_sub(mem) & 0x80 != 0;
     }
 
     fn cpy(&mut self, mem: u8) {
+        println!("cpy {mem}");
         self.reg.c = self.reg.y >= mem;
         self.reg.z = self.reg.y == mem;
         self.reg.n = self.reg.y.wrapping_sub(mem) & 0x80 != 0;
     }
 
     fn eor(&mut self, mem: u8) {
+        println!("eor {mem}");
         let res = self.reg.a ^ mem;
         self.reg.z = res == 0;
         self.reg.n = res & 0x80 != 0;
@@ -344,30 +357,35 @@ impl CPU {
     }
 
     fn lda(&mut self, mem: u8) {
+        println!("lda {mem}");
         self.reg.z = mem == 0;
         self.reg.n = mem & 0x80 != 0;
         self.reg.a = mem;
     }
 
     fn ldx(&mut self, mem: u8) {
+        println!("ldx {mem}");
         self.reg.z = mem == 0;
         self.reg.n = mem & 0x80 != 0;
         self.reg.x = mem;
     }
 
     fn ldy(&mut self, mem: u8) {
+        println!("ldy {mem}");
         self.reg.z = mem == 0;
         self.reg.n = mem & 0x80 != 0;
         self.reg.y = mem;
     }
 
     fn ora(&mut self, mem: u8) {
+        println!("ora {mem}");
         self.reg.a = self.reg.a | mem;
         self.reg.z = self.reg.a == 0;
         self.reg.n = self.reg.a & 0x80 != 0;
     }
 
     fn sbc(&mut self, mem: u8) {
+        println!("sbc {mem}");
         let res = self.reg.a as i16 - mem as i16 - if self.reg.c { 0 } else { 1 };
         self.reg.c = res >= 0;
         let res = (res & 0x00FF) as u8;
@@ -393,6 +411,7 @@ impl CPU {
     }
 
     fn branch_if_condition(&mut self, v: bool) {
+        println!("branch condition {v}");
         let rel = self.fetch_pc_byte().cast_signed() as i16;
         let dest = self.reg.pc.wrapping_add_signed(rel);
         self.cycle_count += 2;
@@ -498,6 +517,7 @@ impl CPU {
             // Immediate
             0x69 => {
                 let immediate = self.fetch_pc_byte();
+
                 self.adc(immediate);
                 self.cycle_count += 2;
             }
@@ -1096,7 +1116,7 @@ impl CPU {
             0xBC => {
                 let arg = self.fetch_pc_word();
                 let mem = self.read_addr_abs_x(arg, true);
-                self.ldx(mem);
+                self.ldy(mem);
             }
             //-----LSR
             //A
@@ -1138,6 +1158,7 @@ impl CPU {
             }
             //----NOP
             0xEA => {
+                println!("nop");
                 self.cycle_count += 2;
             }
             //--- ORA
@@ -1359,71 +1380,87 @@ impl CPU {
             }
             //----SEC
             0x38 => {
+                println!("sec");
                 self.reg.c = true;
                 self.cycle_count += 2;
             }
             //----SED
             0xF8 => {
+                println!("sed");
                 self.reg.d = true;
                 self.cycle_count += 2;
             }
             //----SEI
             0x78 => {
+                println!("sei");
                 self.reg.schedule_i = Some(true);
                 self.cycle_count += 2;
             }
             //--- STA
             // ZP
             0x85 => {
+                println!("sta");
                 let addr = self.fetch_pc_byte();
                 self.mem.write(addr as usize, self.reg.a);
                 self.cycle_count += 3;
             }
             //ZP, X
             0x95 => {
+                println!("sta");
                 let arg = self.fetch_pc_byte();
                 self.write_addr_zp_x(arg, self.reg.a, true);
             }
             //ABS
             0x8D => {
+                println!("sta");
                 let addr = self.fetch_pc_word();
                 self.mem.write(addr as usize, self.reg.a);
                 self.cycle_count += 4;
             }
             //ABS, X
             0x9D => {
+                println!("sta");
                 let arg = self.fetch_pc_word();
                 self.write_addr_abs_x(arg, self.reg.a, true);
             }
             //ABS, Y
             0x99 => {
+                println!("sta");
                 let arg = self.fetch_pc_word();
-                self.write_addr_abs_x(arg, self.reg.a, true);
+                self.write_addr_abs_y(arg, self.reg.a, true);
             }
             //(IND, X)
             0x81 => {
+                println!("sta");
                 let arg = self.fetch_pc_byte();
                 self.write_addr_indr_x(arg, self.reg.a, true);
             }
             //(IND), Y
             0x91 => {
+                println!("sta");
                 let arg = self.fetch_pc_byte();
                 self.write_addr_indr_y(arg, self.reg.a, true);
             }
             //--- STX
             // ZP
             0x86 => {
+                println!("stx");
+
                 let addr = self.fetch_pc_byte();
                 self.mem.write(addr as usize, self.reg.x);
                 self.cycle_count += 3;
             }
             //ZP, Y
             0x96 => {
+                println!("stx");
+
                 let arg = self.fetch_pc_byte();
                 self.write_addr_zp_y(arg, self.reg.x, true);
             }
             //ABS
             0x8E => {
+                println!("stx");
+
                 let addr = self.fetch_pc_word();
                 self.mem.write(addr as usize, self.reg.x);
                 self.cycle_count += 4;
@@ -1431,23 +1468,27 @@ impl CPU {
             //--- STY
             // ZP
             0x84 => {
+                println!("sty");
                 let addr = self.fetch_pc_byte();
                 self.mem.write(addr as usize, self.reg.y);
                 self.cycle_count += 3;
             }
             //ZP, X
             0x94 => {
+                println!("sty");
                 let arg = self.fetch_pc_byte();
                 self.write_addr_zp_x(arg, self.reg.y, true);
             }
             //ABS
             0x8C => {
+                println!("sty");
                 let addr = self.fetch_pc_word();
                 self.mem.write(addr as usize, self.reg.y);
                 self.cycle_count += 4;
             }
             //----TAX
             0xAA => {
+                println!("TAX");
                 self.reg.x = self.reg.a;
                 self.reg.z = self.reg.x == 0;
                 self.reg.n = self.reg.x & 0x80 != 0;
@@ -1455,6 +1496,7 @@ impl CPU {
             }
             //----TAY
             0xA8 => {
+                println!("TAY");
                 self.reg.y = self.reg.a;
                 self.reg.z = self.reg.y == 0;
                 self.reg.n = self.reg.y & 0x80 != 0;
@@ -1462,6 +1504,7 @@ impl CPU {
             }
             //----TSX
             0xBA => {
+                println!("TXS");
                 self.reg.x = self.reg.sp;
                 self.reg.z = self.reg.x == 0;
                 self.reg.n = self.reg.x & 0x80 != 0;
@@ -1469,6 +1512,7 @@ impl CPU {
             }
             //----TXA
             0x8A => {
+                println!("TXA");
                 self.reg.a = self.reg.x;
                 self.reg.z = self.reg.a == 0;
                 self.reg.n = self.reg.a & 0x80 != 0;
@@ -1476,11 +1520,13 @@ impl CPU {
             }
             //----TXS
             0x9A => {
+                println!("TXS");
                 self.reg.sp = self.reg.x;
                 self.cycle_count += 2;
             }
             //----TYA
             0x98 => {
+                println!("TYA");
                 self.reg.a = self.reg.y;
                 self.reg.z = self.reg.a == 0;
                 self.reg.n = self.reg.a & 0x80 != 0;
