@@ -88,9 +88,10 @@ impl Nes {
             self.cpu.execute_instruction();
             let oamdma_poll = self.ppu.reg().borrow_mut().poll_write_oamdma();
             if let Some(oamdma) = oamdma_poll {
-                let cpu_mem = self.cpu.mem_mut();
                 let oam = self.ppu.oam_mut();
                 let mut cpu_addr = (oamdma as usize) << 8;
+                self.cpu.dump_memory(cpu_addr as u16, 0x100);
+                let cpu_mem = self.cpu.mem_mut();
                 for oam_addr in 0..256 {
                     oam[oam_addr] = cpu_mem.read(cpu_addr);
                     cpu_addr += 1;
