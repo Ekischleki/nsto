@@ -380,13 +380,16 @@ impl CPU {
     fn push(&mut self, mem: u8) {
         let sp = self.reg.sp as usize + 0x100;
         self.mem.write(sp, mem);
+        println!("Push {mem} to {}", self.reg.sp);
         self.reg.sp = self.reg.sp.wrapping_sub(1);
     }
 
     fn pop(&mut self) -> u8 {
         self.reg.sp = self.reg.sp.wrapping_add(1);
         let sp = self.reg.sp as usize + 0x100;
-        self.mem.read(sp)
+        let res = self.mem.read(sp);
+        println!("Pop {res} from {}", self.reg.sp);
+        res
     }
 
     fn branch_if_condition(&mut self, v: bool) {
@@ -413,7 +416,24 @@ impl CPU {
         let hi = self.pop();
         self.reg.pc = u16::from_le_bytes([lo, hi]);
     }
+    pub fn dump_memory(&mut self, start: u16, len: usize) {
+        for offset in (0..len).step_by(16) {
+            let addr = start.wrapping_add(offset as u16);
 
+            print!("{addr:04X}: ");
+
+            for i in 0..16 {
+                if offset + i < len {
+                    let value = self.mem.read(addr.wrapping_add(i as u16) as usize);
+                    print!("{value:02X} ");
+                } else {
+                    print!("   ");
+                }
+            }
+
+            println!();
+        }
+    }
     fn pack_flags(&self, b5: bool, b4: bool) -> u8 {
         let mut packed = 0b00000000;
         if self.reg.n {
@@ -458,6 +478,7 @@ impl CPU {
 
     ///Triggers a non maskable interrupt
     pub fn nmi(&mut self) {
+        println!("NMI call");
         self.push_pc_to_stack();
         self.push(self.pack_flags(true, false));
         self.reg.i = true;
@@ -925,7 +946,7 @@ impl CPU {
             }
             //----INY
             0xC8 => {
-                self.reg.y = self.reg.y.wrapping_sub(1);
+                self.reg.y = self.reg.y.wrapping_add(1);
                 self.reg.z = self.reg.y == 0;
                 self.reg.n = self.reg.y & 0x80 != 0;
                 self.cycle_count += 2;
@@ -939,6 +960,7 @@ impl CPU {
             }
             //Ind
             0x6C => {
+                self.dump_memory(0, 0xFF);
                 let ptr = self.fetch_pc_word();
                 //This op is bugged and does not wrap the hi byte of the ptr when dereferencing across a page boundary
                 let lo = self.mem.read(ptr as usize);
@@ -946,12 +968,15 @@ impl CPU {
                 let updated_ptr = (0xFF00 & ptr) | (0xFF & updated_ptr);
                 let hi = self.mem.read(updated_ptr as usize);
                 let addr = u16::from_le_bytes([lo, hi]);
+                println!("Jmp (${ptr}) = Jmp ${addr}");
                 self.reg.pc = addr;
                 self.cycle_count += 5;
             }
             //----JSR
             0x20 => {
                 let addr = self.fetch_pc_word();
+                println!("JSR {addr}");
+                self.reg.pc = self.reg.pc.wrapping_sub(1);
                 self.push_pc_to_stack();
                 self.reg.pc = addr;
                 self.cycle_count += 6;
@@ -1167,22 +1192,26 @@ impl CPU {
             }
             //----PHA
             0x48 => {
+                println!("PHA");
                 self.push(self.reg.a);
                 self.cycle_count += 3;
             }
             //---PHP
             0x08 => {
+                println!("PHP");
                 let packed = self.pack_flags(true, true);
                 self.push(packed);
                 self.cycle_count += 3;
             }
             //----PLA
             0x68 => {
+                println!("PLA");
                 self.reg.a = self.pop();
                 self.cycle_count += 3;
             }
             //----PLP
             0x28 => {
+                println!("PLP");
                 let packed = self.pop();
                 self.apply_packed(packed, true);
                 self.cycle_count += 4;
@@ -1265,6 +1294,7 @@ impl CPU {
             }
             //----RTI
             0x40 => {
+                println!("RTI call");
                 let packed = self.pop();
                 self.apply_packed(packed, false);
                 self.pop_pc_from_stack();
@@ -1272,8 +1302,9 @@ impl CPU {
             }
             //----RTS
             0x60 => {
+                println!("RTS call");
                 self.pop_pc_from_stack();
-                //self.reg.pc += 1;
+                self.reg.pc += 1;
                 self.cycle_count += 6;
             }
             //--- SBC
@@ -1455,7 +1486,9 @@ impl CPU {
                 self.reg.n = self.reg.a & 0x80 != 0;
                 self.cycle_count += 2;
             }
-            _ => todo!("Unimplemented instruction"),
+            _ => {
+                println!("Unimplemented instruction {instr} at pc {}", self.reg.pc)
+            }
         }
     }
 
