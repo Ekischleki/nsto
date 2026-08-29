@@ -8,9 +8,10 @@ pub mod memory;
 pub mod memory_regions;
 pub mod nes;
 pub mod ppu;
+pub mod controller;
 
 fn main() {
-    let cartridge = Cartridge::from_ines(&mut File::open("./SMB.nes").unwrap());
+    let cartridge = Cartridge::from_ines(&mut File::open("./basics.nes").unwrap());
 
     let mut nes = Nes::from_cartridge(cartridge);
 

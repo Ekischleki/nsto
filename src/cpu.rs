@@ -1,6 +1,7 @@
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
-    memory::{DummyMem, InternalRam, Memory, MemoryRegion},
-    ppu::{PPU, PPUOamDmaRegisterMap, PPURegistersMap},
+    controller::{ConrollerMemory, Controller}, memory::{DummyMem, InternalRam, Memory, MemoryRegion}, ppu::{PPU, PPUOamDmaRegisterMap, PPURegistersMap},
 };
 
 pub struct Registers {
@@ -77,13 +78,16 @@ impl CPU {
     pub fn with_cartridge_memory(
         mut mem: Vec<Box<dyn MemoryRegion>>,
         ppu: &PPU,
+        controller: Rc<RefCell<Controller>>
     ) -> Memory<0x10000> {
         let mut default_mem: Vec<Box<dyn MemoryRegion>> = vec![
             Box::new(InternalRam::default()),
             Box::new(PPURegistersMap::new(ppu.reg())),
             Box::new(DummyMem::new((0x4000..0x4014).into())),
             Box::new(PPUOamDmaRegisterMap::new(ppu.reg())),
-            Box::new(DummyMem::new((0x4015..0x4020).into())),
+            Box::new(DummyMem::new((0x4015..0x4016).into())),
+            Box::new(ConrollerMemory::new(controller)),
+            Box::new(DummyMem::new((0x4018..0x4020).into())),
         ];
         default_mem.append(&mut mem);
         Memory::construct(default_mem).unwrap()
