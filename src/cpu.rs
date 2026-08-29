@@ -176,7 +176,10 @@ impl CPU {
     }
 
     fn deref_word_at_zp(&mut self, ptr: u8) -> u16 {
-        self.deref_word_at(ptr as u16)
+        let lo = self.mem.read(ptr as usize);
+        let hi = self.mem.read(ptr.wrapping_add(1) as usize);
+        let res = u16::from_le_bytes([lo, hi]);
+        res
     }
 
     fn deref_word_at(&mut self, ptr: u16) -> u16 {
@@ -257,22 +260,25 @@ impl CPU {
     }
 
     fn adc(&mut self, mem: u8) {
-        println!("adc {mem}");
+        //println!("adc {mem}");
         let res = self.reg.a as u16 + mem as u16 + if self.reg.c { 1 } else { 0 };
-        self.set_flags(true, true, true, res);
+        self.reg.c = res > 0xFF;
+        self.reg.z = res & 0xFF == 0;
+        self.reg.n = res & 0x80 != 0; 
+        //self.set_flags(true, true, true, res);
         let res = (res & 0xFF) as u8;
         self.reg.v = (res ^ self.reg.a) & (res ^ mem) & 0x80 != 0;
         self.reg.a = res;
     }
 
     fn and(&mut self, mem: u8) {
-        println!("and {mem}");
+        //println!("and {mem}");
         self.reg.a = self.reg.a & mem;
         self.set_flags(false, true, true, self.reg.a as u16);
     }
 
     fn asl(&mut self, value: u8) -> u8 {
-        println!("asl {value}");
+        //println!("asl {value}");
         self.reg.c = value & 0x80 != 0;
         let res = value << 1;
         self.reg.z = res == 0;
@@ -281,7 +287,7 @@ impl CPU {
     }
 
     fn lsr(&mut self, value: u8) -> u8 {
-        println!("lsr {value}");
+        //println!("lsr {value}");
         self.reg.c = value & 0x01 != 0;
         let res = value >> 1;
         self.reg.z = res == 0;
@@ -290,25 +296,27 @@ impl CPU {
     }
 
     fn ror(&mut self, value: u8) -> u8 {
-        println!("ror {value}");
+        //println!("ror {value}");
+        let old_c = self.reg.c;
         self.reg.c = value & 0x01 != 0;
-        let res = value.rotate_right(1);
+        let res = value >> 1 | if old_c {0x80} else {0};
         self.reg.z = res == 0;
         self.reg.n = res & 0x80 != 0;
         res
     }
 
     fn rol(&mut self, value: u8) -> u8 {
-        println!("rol {value}");
+        //println!("rol {value}");
+        let old_c = self.reg.c;
         self.reg.c = value & 0x80 != 0;
-        let res = value.rotate_left(1);
+        let res = value << 1 | if old_c {1} else {0};
         self.reg.z = res == 0;
         self.reg.n = res & 0x80 != 0;
         res
     }
 
     fn dec(&mut self, value: u8) -> u8 {
-        println!("dec {value}");
+        //println!("dec {value}");
         let res = value.wrapping_sub(1);
         self.reg.z = res == 0;
         self.reg.n = res & 0x80 != 0;
@@ -316,7 +324,7 @@ impl CPU {
     }
 
     fn inc(&mut self, value: u8) -> u8 {
-        println!("inc {value}");
+        //println!("inc {value}");
         let res = value.wrapping_add(1);
         self.reg.z = res == 0;
         self.reg.n = res & 0x80 != 0;
@@ -324,36 +332,36 @@ impl CPU {
     }
 
     fn bit(&mut self, mem: u8) {
-        println!("bit {mem}");
+        //println!("bit {mem}");
         let v = self.reg.a & mem;
         self.reg.z = v == 0;
-        self.reg.n = v & 0x80 != 0;
-        self.reg.v = v & 0x40 != 0;
+        self.reg.n = mem & 0x80 != 0;
+        self.reg.v = mem & 0x40 != 0;
     }
 
     fn cmp(&mut self, mem: u8) {
-        println!("cmp {mem}");
+        //println!("cmp {mem}");
         self.reg.c = self.reg.a >= mem;
         self.reg.z = self.reg.a == mem;
         self.reg.n = self.reg.a.wrapping_sub(mem) & 0x80 != 0;
     }
 
     fn cpx(&mut self, mem: u8) {
-        println!("cpx {mem}");
+        //println!("cpx {mem}");
         self.reg.c = self.reg.x >= mem;
         self.reg.z = self.reg.x == mem;
         self.reg.n = self.reg.x.wrapping_sub(mem) & 0x80 != 0;
     }
 
     fn cpy(&mut self, mem: u8) {
-        println!("cpy {mem}");
+        //println!("cpy {mem}");
         self.reg.c = self.reg.y >= mem;
         self.reg.z = self.reg.y == mem;
         self.reg.n = self.reg.y.wrapping_sub(mem) & 0x80 != 0;
     }
 
     fn eor(&mut self, mem: u8) {
-        println!("eor {mem}");
+        //println!("eor {mem}");
         let res = self.reg.a ^ mem;
         self.reg.z = res == 0;
         self.reg.n = res & 0x80 != 0;
@@ -361,35 +369,35 @@ impl CPU {
     }
 
     fn lda(&mut self, mem: u8) {
-        println!("lda {mem}");
+        //println!("lda {mem}");
         self.reg.z = mem == 0;
         self.reg.n = mem & 0x80 != 0;
         self.reg.a = mem;
     }
 
     fn ldx(&mut self, mem: u8) {
-        println!("ldx {mem}");
+        //println!("ldx {mem}");
         self.reg.z = mem == 0;
         self.reg.n = mem & 0x80 != 0;
         self.reg.x = mem;
     }
 
     fn ldy(&mut self, mem: u8) {
-        println!("ldy {mem}");
+        //println!("ldy {mem}");
         self.reg.z = mem == 0;
-        self.reg.n = mem & 0x80 != 0;
+        self.reg.n = (mem & 0x80) != 0;
         self.reg.y = mem;
     }
 
     fn ora(&mut self, mem: u8) {
-        println!("ora {mem}");
+        //println!("ora {mem}");
         self.reg.a = self.reg.a | mem;
         self.reg.z = self.reg.a == 0;
         self.reg.n = self.reg.a & 0x80 != 0;
     }
 
     fn sbc(&mut self, mem: u8) {
-        println!("sbc {mem}");
+        //println!("sbc {mem}");
         let res = self.reg.a as i16 - mem as i16 - if self.reg.c { 0 } else { 1 };
         self.reg.c = res >= 0;
         let res = (res & 0x00FF) as u8;
@@ -402,7 +410,7 @@ impl CPU {
     fn push(&mut self, mem: u8) {
         let sp = self.reg.sp as usize + 0x100;
         self.mem.write(sp, mem);
-        println!("Push {mem} to {}", self.reg.sp);
+        //println!("Push {mem} to {}", self.reg.sp);
         self.reg.sp = self.reg.sp.wrapping_sub(1);
     }
 
@@ -410,12 +418,12 @@ impl CPU {
         self.reg.sp = self.reg.sp.wrapping_add(1);
         let sp = self.reg.sp as usize + 0x100;
         let res = self.mem.read(sp);
-        println!("Pop {res} from {}", self.reg.sp);
+        //println!("Pop {res} from {}", self.reg.sp);
         res
     }
 
     fn branch_if_condition(&mut self, v: bool) {
-        println!("branch condition {v}");
+        //println!("branch condition {v}");
         let rel = self.fetch_pc_byte().cast_signed() as i16;
         let dest = self.reg.pc.wrapping_add_signed(rel);
         self.cycle_count += 2;
@@ -501,7 +509,7 @@ impl CPU {
 
     ///Triggers a non maskable interrupt
     pub fn nmi(&mut self) {
-        println!("NMI call");
+        //println!("NMI call");
         self.push_pc_to_stack();
         self.push(self.pack_flags(true, false));
         self.reg.i = true;
@@ -511,6 +519,9 @@ impl CPU {
     }
 
     pub fn execute_instruction(&mut self) {
+        if self.reg.pc == 0xD4BD {
+            println!("BREAK!")
+        }
         if let Some(sched_i) = self.reg.schedule_i.take() {
             self.reg.i = sched_i;
         }
@@ -753,7 +764,7 @@ impl CPU {
             }
             //ZP, X
             0xD5 => {
-                let arg = self.fetch_abs_from_pc();
+                let arg = self.fetch_pc_byte();
                 let mem = self.read_addr_zp_x(arg, true);
                 self.cmp(mem);
             }
@@ -893,7 +904,7 @@ impl CPU {
             }
             //ZP, X
             0x55 => {
-                let arg = self.fetch_abs_from_pc();
+                let arg = self.fetch_pc_byte();
                 let mem = self.read_addr_zp_x(arg, true);
                 self.eor(mem);
             }
@@ -984,7 +995,7 @@ impl CPU {
             }
             //Ind
             0x6C => {
-                self.dump_memory(0, 0xFF);
+                //self.dump_memory(0, 0xFF);
                 let ptr = self.fetch_pc_word();
                 //This op is bugged and does not wrap the hi byte of the ptr when dereferencing across a page boundary
                 let lo = self.mem.read(ptr as usize);
@@ -992,14 +1003,14 @@ impl CPU {
                 let updated_ptr = (0xFF00 & ptr) | (0xFF & updated_ptr);
                 let hi = self.mem.read(updated_ptr as usize);
                 let addr = u16::from_le_bytes([lo, hi]);
-                println!("Jmp (${ptr}) = Jmp ${addr}");
+                //println!("Jmp (${ptr}) = Jmp ${addr}");
                 self.reg.pc = addr;
                 self.cycle_count += 5;
             }
             //----JSR
             0x20 => {
                 let addr = self.fetch_pc_word();
-                println!("JSR {addr}");
+                //println!("JSR {addr}");
                 self.reg.pc = self.reg.pc.wrapping_sub(1);
                 self.push_pc_to_stack();
                 self.reg.pc = addr;
@@ -1021,7 +1032,7 @@ impl CPU {
             }
             //ZP, X
             0xB5 => {
-                let arg = self.fetch_abs_from_pc();
+                let arg = self.fetch_pc_byte();
                 let mem = self.read_addr_zp_x(arg, true);
                 self.lda(mem);
             }
@@ -1072,7 +1083,7 @@ impl CPU {
             }
             //ZP, Y
             0xB6 => {
-                let arg = self.fetch_abs_from_pc();
+                let arg = self.fetch_pc_byte();
                 let mem = self.read_addr_zp_y(arg, true);
                 self.ldx(mem);
             }
@@ -1105,7 +1116,7 @@ impl CPU {
             }
             //ZP, X
             0xB4 => {
-                let arg = self.fetch_abs_from_pc();
+                let arg = self.fetch_pc_byte();
                 let mem = self.read_addr_zp_x(arg, true);
                 self.ldy(mem);
             }
@@ -1162,7 +1173,7 @@ impl CPU {
             }
             //----NOP
             0xEA => {
-                println!("nop");
+                //println!("nop");
                 self.cycle_count += 2;
             }
             //--- ORA
@@ -1217,26 +1228,28 @@ impl CPU {
             }
             //----PHA
             0x48 => {
-                println!("PHA");
+                //println!("PHA");
                 self.push(self.reg.a);
                 self.cycle_count += 3;
             }
             //---PHP
             0x08 => {
-                println!("PHP");
+                //println!("PHP");
                 let packed = self.pack_flags(true, true);
                 self.push(packed);
                 self.cycle_count += 3;
             }
             //----PLA
             0x68 => {
-                println!("PLA");
+                //println!("PLA");
                 self.reg.a = self.pop();
+                self.reg.z = self.reg.a == 0;
+                self.reg.n = self.reg.a & 0x80 != 0;
                 self.cycle_count += 3;
             }
             //----PLP
             0x28 => {
-                println!("PLP");
+                //println!("PLP");
                 let packed = self.pop();
                 self.apply_packed(packed, true);
                 self.cycle_count += 4;
@@ -1319,7 +1332,7 @@ impl CPU {
             }
             //----RTI
             0x40 => {
-                println!("RTI call");
+                //println!("RTI call");
                 let packed = self.pop();
                 self.apply_packed(packed, false);
                 self.pop_pc_from_stack();
@@ -1327,7 +1340,7 @@ impl CPU {
             }
             //----RTS
             0x60 => {
-                println!("RTS call");
+                //println!("RTS call");
                 self.pop_pc_from_stack();
                 self.reg.pc += 1;
                 self.cycle_count += 6;
@@ -1384,71 +1397,71 @@ impl CPU {
             }
             //----SEC
             0x38 => {
-                println!("sec");
+                //println!("sec");
                 self.reg.c = true;
                 self.cycle_count += 2;
             }
             //----SED
             0xF8 => {
-                println!("sed");
+                //println!("sed");
                 self.reg.d = true;
                 self.cycle_count += 2;
             }
             //----SEI
             0x78 => {
-                println!("sei");
+                //println!("sei");
                 self.reg.schedule_i = Some(true);
                 self.cycle_count += 2;
             }
             //--- STA
             // ZP
             0x85 => {
-                println!("sta");
+                //println!("sta");
                 let addr = self.fetch_pc_byte();
                 self.mem.write(addr as usize, self.reg.a);
                 self.cycle_count += 3;
             }
             //ZP, X
             0x95 => {
-                println!("sta");
+                //println!("sta");
                 let arg = self.fetch_pc_byte();
                 self.write_addr_zp_x(arg, self.reg.a, true);
             }
             //ABS
             0x8D => {
-                println!("sta");
+                //println!("sta");
                 let addr = self.fetch_pc_word();
                 self.mem.write(addr as usize, self.reg.a);
                 self.cycle_count += 4;
             }
             //ABS, X
             0x9D => {
-                println!("sta");
+                //println!("sta");
                 let arg = self.fetch_pc_word();
                 self.write_addr_abs_x(arg, self.reg.a, true);
             }
             //ABS, Y
             0x99 => {
-                println!("sta");
+                //println!("sta");
                 let arg = self.fetch_pc_word();
                 self.write_addr_abs_y(arg, self.reg.a, true);
             }
             //(IND, X)
             0x81 => {
-                println!("sta");
+                //println!("sta");
                 let arg = self.fetch_pc_byte();
                 self.write_addr_indr_x(arg, self.reg.a, true);
             }
             //(IND), Y
             0x91 => {
-                println!("sta");
+                //println!("sta");
                 let arg = self.fetch_pc_byte();
                 self.write_addr_indr_y(arg, self.reg.a, true);
             }
             //--- STX
             // ZP
             0x86 => {
-                println!("stx");
+                //println!("stx");
 
                 let addr = self.fetch_pc_byte();
                 self.mem.write(addr as usize, self.reg.x);
@@ -1456,14 +1469,14 @@ impl CPU {
             }
             //ZP, Y
             0x96 => {
-                println!("stx");
+                //println!("stx");
 
                 let arg = self.fetch_pc_byte();
                 self.write_addr_zp_y(arg, self.reg.x, true);
             }
             //ABS
             0x8E => {
-                println!("stx");
+                //println!("stx");
 
                 let addr = self.fetch_pc_word();
                 self.mem.write(addr as usize, self.reg.x);
@@ -1472,27 +1485,27 @@ impl CPU {
             //--- STY
             // ZP
             0x84 => {
-                println!("sty");
+                //println!("sty");
                 let addr = self.fetch_pc_byte();
                 self.mem.write(addr as usize, self.reg.y);
                 self.cycle_count += 3;
             }
             //ZP, X
             0x94 => {
-                println!("sty");
+                //println!("sty");
                 let arg = self.fetch_pc_byte();
                 self.write_addr_zp_x(arg, self.reg.y, true);
             }
             //ABS
             0x8C => {
-                println!("sty");
+                //println!("sty");
                 let addr = self.fetch_pc_word();
                 self.mem.write(addr as usize, self.reg.y);
                 self.cycle_count += 4;
             }
             //----TAX
             0xAA => {
-                println!("TAX");
+                //println!("TAX");
                 self.reg.x = self.reg.a;
                 self.reg.z = self.reg.x == 0;
                 self.reg.n = self.reg.x & 0x80 != 0;
@@ -1500,7 +1513,7 @@ impl CPU {
             }
             //----TAY
             0xA8 => {
-                println!("TAY");
+                //println!("TAY");
                 self.reg.y = self.reg.a;
                 self.reg.z = self.reg.y == 0;
                 self.reg.n = self.reg.y & 0x80 != 0;
@@ -1508,7 +1521,7 @@ impl CPU {
             }
             //----TSX
             0xBA => {
-                println!("TXS");
+                //println!("TSX");
                 self.reg.x = self.reg.sp;
                 self.reg.z = self.reg.x == 0;
                 self.reg.n = self.reg.x & 0x80 != 0;
@@ -1516,7 +1529,7 @@ impl CPU {
             }
             //----TXA
             0x8A => {
-                println!("TXA");
+                //println!("TXA");
                 self.reg.a = self.reg.x;
                 self.reg.z = self.reg.a == 0;
                 self.reg.n = self.reg.a & 0x80 != 0;
@@ -1524,13 +1537,13 @@ impl CPU {
             }
             //----TXS
             0x9A => {
-                println!("TXS");
+                //println!("TXS");
                 self.reg.sp = self.reg.x;
                 self.cycle_count += 2;
             }
             //----TYA
             0x98 => {
-                println!("TYA");
+                //println!("TYA");
                 self.reg.a = self.reg.y;
                 self.reg.z = self.reg.a == 0;
                 self.reg.n = self.reg.a & 0x80 != 0;
