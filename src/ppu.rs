@@ -112,12 +112,12 @@ impl PPURegisters {
         self.ppumask & 0x80 != 0
     }
     pub fn scroll_x(&self) -> u16 {
-        let bit_8 = ((self.ppuctrl & 0x01) as u16) << 8;
-        (self.ppuscroll & 0xFF) | bit_8
+        let base_nametable = ((self.ppuctrl & 0x01) as u16) * 256;
+        ((self.ppuscroll & 0xFF00) >> 8) + base_nametable
     }
     pub fn scroll_y(&self) -> u16 {
-        let bit_8 = ((self.ppuctrl & 0x02) as u16) << 7;
-        ((self.ppuscroll & 0xFF00) >> 8) | bit_8
+        let base_nametable = (((self.ppuctrl & 0x02) as u16) >> 1) * 240;
+        (self.ppuscroll & 0xFF) + base_nametable
     }
     pub fn coarse_scroll_x(&self) -> u8 {
         (self.scroll_x() >> 3) as u8
@@ -267,26 +267,36 @@ impl PPU {
 
     ///Returns the sprites' color (transparent otherwise) and whether the sprite was sprite 0
     fn get_sprite_pixel(&mut self, behind_background: bool) -> (u32, bool) {
-        let x_min = self.dot;
-        let x_max = self.dot + 8;
+        let x_max = self.dot;
+        let x_min = self.dot.saturating_sub(7);
         let mut sprite_0 = false;
         let mut render_color = 0;
         for i in (0..self.sprite_list.len()).rev() {
             let sprite_idx = self.sprite_list[i];
-            let sprite_y = self.oam[sprite_idx * 4] as usize;
+            let sprite_y = (self.oam[sprite_idx * 4] as usize).saturating_add(1);
             let sprite_tile = self.oam[sprite_idx * 4 + 1];
             let sprite_attr = self.oam[sprite_idx * 4 + 2];
-            let sprite_x = self.oam[sprite_idx * 4 + 3] as usize;
+            let sprite_x =( self.oam[sprite_idx * 4 + 3] as usize).saturating_add(0);
 
-            if !(x_min..x_max).contains(&sprite_x) {
+            let flip_horizontally = sprite_attr & 0x40 != 0;
+            let flip_vertically = sprite_attr & 0x80 != 0;
+
+            if !(x_min..=x_max).contains(&sprite_x) {
                 continue;
             }
             let sprite_behind_background = sprite_attr & 0x20 != 0;
             if sprite_behind_background != behind_background {
                 continue;
             }
-            let tile_row = sprite_y + 1 - self.line;
-            let tile_col = sprite_x - self.dot;
+
+            let mut tile_row = self.line - sprite_y;
+            let mut tile_col = self.dot - sprite_x;
+            if flip_vertically {
+                tile_row = 7 - tile_row;
+            }
+            if !flip_horizontally {
+                tile_col = 7 - tile_col;
+            }
             let pattern_addr =
                 self.reg.borrow().sprite_pattern_addr() + (sprite_tile as usize) * 16;
 
@@ -331,13 +341,15 @@ impl PPU {
             let (low_priority_pixel, sprite_0) = self.get_sprite_pixel(true);
             if low_priority_pixel & 0xFF000000 != 0 {
                 //Bug with nes means that sprite 0 collision is not detected on dot 255 of rendering
-                if sprite_0 && background_opaque && self.dot < 255 {
+                if sprite_0 && self.dot < 255 {
                     self.reg.borrow_mut().set_sprt_hit_flag(true);
                 }
                 if !background_opaque {
                     pixel = low_priority_pixel;
                 }
             }
+            //self.reg.borrow_mut().set_sprt_hit_flag(true);
+
             let (high_priority_pixel, sprite_0) = self.get_sprite_pixel(false);
             if high_priority_pixel & 0xFF000000 != 0 {
                 if sprite_0 && background_opaque && self.dot < 255 {
@@ -383,7 +395,9 @@ impl PPU {
 
     pub fn clock(&mut self) {
         self.check_registers();
-
+        if self.line == 260 {
+            self.reg.borrow_mut().set_sprt_hit_flag(false);
+        }
         if self.line < 240 && self.dot == 0 {
             self.gen_sprite_list();
         }
@@ -420,18 +434,18 @@ impl PPU {
             8
         };
         self.sprite_list.clear();
-        let min_sprite_y = self.line;
-        let max_sprite_y = min_sprite_y + sprite_height;
-        let mut overflow_m = 0;
+        let max_sprite_y = self.line;
+        let min_sprite_y = max_sprite_y.saturating_sub(sprite_height - 1);
+        let mut overflow_m: usize = 0;
         for i in 0..64 {
             let idx = i * 4;
-            let sprite_y = self.oam[idx + overflow_m] as usize;
-            if (min_sprite_y..max_sprite_y).contains(&(sprite_y + 1)) {
+            let sprite_y = (self.oam[idx + overflow_m] as usize).saturating_add(1);
+            if (min_sprite_y..=max_sprite_y).contains(&(sprite_y)) {
                 if self.sprite_list.len() == 8 {
                     self.reg.borrow_mut().set_sprt_overflow_flag(true);
                     continue;
                 }
-                self.sprite_list.push(idx);
+                self.sprite_list.push(i);
             }
             if self.sprite_list.len() == 8 {
                 overflow_m = (overflow_m + 1) % 4;
