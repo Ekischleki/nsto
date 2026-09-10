@@ -553,7 +553,8 @@ impl MemoryRegion for PPURegistersMap {
             0x0006 => {
                 let mut reg = self.reg.borrow_mut();
                 if let Some(hi) = reg.t.take() {
-                    reg.ppuaddr = (((hi as u16) << 8) | (data as u16)) & 0x3FFF;
+                    let full_addr = ((hi as u16) << 8) | (data as u16);
+                    reg.ppuaddr = full_addr & 0x3FFF;
                 } else {
                     reg.t = Some(data);
                 }
