@@ -1,10 +1,7 @@
-use std::{io::Read, iter::Map};
+use std::{cell::RefCell, io::Read, iter::Map, rc::Rc};
 
 use crate::{
-    cpu::CPU,
-    memory::{DummyMem, Memory, MemoryRegion},
-    memory_regions::{Rom, RwRam},
-    ppu::PPU,
+    controller::Controller, cpu::CPU, memory::{DummyMem, MemoryBus, MemoryRegion}, memory_regions::{Rom, RwRam}, ppu::PPU,
 };
 
 pub struct Cartridge {
@@ -56,22 +53,27 @@ impl Cartridge {
         if let ChrRomType::ChrRom(r) = self.chr_rom {
             assert_eq!(r.len(), 1);
             ppu_region.push(Box::new(Rom::with_mirrored_width(0, 0x2000, r[0].data)));
+        } else {
+            ppu_region.push(Box::new(DummyMem::new((0..0x2000).into())));
         }
 
         let ppu_mem = PPU::with_cartridge_memory(ppu_region, self.nametable_mirroring);
 
         let ppu = PPU::start_with_memory(ppu_mem);
 
-        let cpu_mem = CPU::with_cartridge_memory(cpu_region, &ppu);
-        let cpu = CPU::start_with_memory(cpu_mem);
+        let controller: Rc<RefCell<Controller>> = Default::default();
 
-        NesDevices { cpu, ppu }
+        let cpu = CPU::with_cartridge_memory(cpu_region, &ppu, controller.clone());
+
+
+        NesDevices { cpu, ppu, controller }
     }
 }
 
 pub struct NesDevices {
     pub cpu: CPU,
     pub ppu: PPU,
+    pub controller: Rc<RefCell< Controller>>
 }
 
 #[repr(u8)]
