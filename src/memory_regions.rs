@@ -1,4 +1,4 @@
-use crate::memory::MemoryRegion;
+use crate::memory::{BusBehavior, MemoryRegion};
 
 pub struct RwRam<const WIDTH: usize> {
     mem: [u8; WIDTH],
@@ -29,8 +29,8 @@ impl<const WIDTH: usize> MemoryRegion for RwRam<WIDTH> {
         self.mem[self.justify_address(rel_idx)] = data;
     }
 
-    fn read(&mut self, rel_idx: usize) -> u8 {
-        self.mem[self.justify_address(rel_idx)]
+    fn read(&mut self, rel_idx: usize) -> BusBehavior {
+        BusBehavior::Set(self.mem[self.justify_address(rel_idx)])
     }
 }
 
@@ -65,7 +65,7 @@ impl<const WIDTH: usize> MemoryRegion for Rom<WIDTH> {
 
     fn write(&mut self, _: usize, _: u8) {}
 
-    fn read(&mut self, rel_idx: usize) -> u8 {
-        self.mem[self.justify_address(rel_idx)]
+    fn read(&mut self, rel_idx: usize) -> BusBehavior {
+        BusBehavior::Set(self.mem[self.justify_address(rel_idx)])
     }
 }

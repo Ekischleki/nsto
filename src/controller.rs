@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use sdl3::keyboard::Keycode;
 
-use crate::memory::MemoryRegion;
+use crate::memory::{BusBehavior, MemoryRegion};
 
 #[derive(Default)]
 pub struct Controller {
@@ -108,14 +108,14 @@ impl MemoryRegion for ConrollerMemory {
         }
     }
 
-    fn read(&mut self, rel_idx: usize) -> u8 {
+    fn read(&mut self, rel_idx: usize) -> BusBehavior {
         if self.strobe {
             self.a = self.controller.borrow().pack_neg();
             //No buttons pressed
             self.b = 0xFF;
         }
 
-        match rel_idx {
+        let controller = match rel_idx {
             0x0000 => {
                 //Inverted
                 let is_pressed = self.a & 0x01 == 0;
@@ -137,6 +137,7 @@ impl MemoryRegion for ConrollerMemory {
                 }
             }
             _ => unreachable!()
-        }
+        };
+        BusBehavior::Partial { val: controller, defined: 0b0000_0111 }
     }
 }

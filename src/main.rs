@@ -11,7 +11,7 @@ pub mod ppu;
 pub mod controller;
 
 fn main() {
-    let cartridge = Cartridge::from_ines(&mut File::open("./basics.nes").unwrap());
+    let cartridge = Cartridge::from_ines(&mut File::open("./Tetris.nes").unwrap());
 
     let mut nes = Nes::from_cartridge(cartridge);
 

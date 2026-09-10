@@ -92,34 +92,38 @@ impl Nes {
         self.ppu.clock();
         //Optionally add up to 2 cycles of ppu clock desync
         let mut wait_for_next_frame = true;
+        let mut slow_display = false;
+        let mut last_nmi = 0;
         loop {
             if instruction_check == 0 {
                 let supposed_cpu_cycle = (start_time.elapsed().as_secs_f64() * 1_790_000.0) as usize;
                 if supposed_cpu_cycle < self.cpu.cycle_count() {
                     continue;
                 }
-                if supposed_cpu_cycle > self.cpu.cycle_count() + 10000 {
-                    println!("Emulator is running slow! Supposed: {supposed_cpu_cycle}, is {} ", self.cpu.cycle_count())
+                if supposed_cpu_cycle > self.cpu.cycle_count() + 100000 {
+                    if !slow_display {
+                        println!("Emulator is running slow! Supposed: {supposed_cpu_cycle}, is {} ", self.cpu.cycle_count())
+                    }
+                    slow_display = true;
+                } else {
+                    if slow_display {
+                        println!("Emulater cought up!");
+                        slow_display = false;
+                    }
                 }
                 instruction_check = 1000;
             }
             instruction_check-=1;
             
-            self.cpu.execute_instruction();
-            let oamdma_poll = self.ppu.reg().borrow_mut().poll_write_oamdma();
-            if let Some(oamdma) = oamdma_poll {
-                let oam = self.ppu.oam_mut();
-                let mut cpu_addr = (oamdma as usize) << 8;
-                //self.cpu.dump_memory(cpu_addr as u16, 0x100);
-                let cpu_mem = self.cpu.mem_mut();
-                for oam_addr in 0..256 {
-                    oam[oam_addr] = cpu_mem.read(cpu_addr);
-                    cpu_addr += 1;
-                }
-                *self.cpu.cycle_count_mut() += 513;
-            }
+            self.cpu.cycle();
+
             while self.ppu.cycle_count() < self.cpu.cycle_count() * 3 {
                 self.ppu.clock();
+                if self.ppu.poll_nmi() {
+                    println!("PPu Clocks since last nmi: {}", self.ppu.cycle_count() - last_nmi);
+                    last_nmi = self.ppu.cycle_count();
+                    self.cpu.nmi();
+                }
             }
 
             if !self.ppu.finished_frame() {
@@ -131,9 +135,6 @@ impl Nes {
                 }
             }
 
-            if self.ppu.poll_nmi() {
-                self.cpu.nmi();
-            }
         }
     }
 }

@@ -1,13 +1,14 @@
 use std::{cell::RefCell, rc::Rc, thread::available_parallelism};
 
+use sdl3::libc::islower;
+
 use crate::{
-    cartridge::NametableMirroring,
-    memory::{DummyMem, Memory, MemoryRegion},
-    memory_regions::RwRam,
+    cartridge::NametableMirroring, cpu::Dma, memory::{BusBehavior, DummyMem, MemoryBus, MemoryRegion}, memory_regions::RwRam,
 };
 
 #[derive(Default)]
 pub struct PPURegisters {
+    last_written_bus: u8,
     ppuctrl: u8,
     ppumask: u8,
     ppustatus: u8,
@@ -18,20 +19,11 @@ pub struct PPURegisters {
     ppuaddr: u16,
     ppudata: u8,
     wrote_ppudata: Option<u16>,
-    oamdma: u8,
-    write_oamdma: bool,
     t: Option<u8>,
 }
 
 impl PPURegisters {
-    pub fn poll_write_oamdma(&mut self) -> Option<u8> {
-        if self.write_oamdma {
-            self.write_oamdma = false;
-            Some(self.oamdma)
-        } else {
-            None
-        }
-    }
+
     pub fn cpu_access_ppudata(&mut self) {
         self.ppuaddr = self.ppuaddr.wrapping_add(self.vram_addr_incr()) & 0x3FFF
     }
@@ -154,7 +146,7 @@ pub struct PPU {
     line: usize,
     dot: usize,
     cycle_count: usize,
-    mem: Memory<0x4000>,
+    mem: MemoryBus<0x4000>,
     reg: Rc<RefCell<PPURegisters>>,
     nmi: bool,
     palette_mapping: [u32; 64],
@@ -176,6 +168,14 @@ impl PPU {
         reg.oamdata = self.oam[reg.oamaddr as usize];
     }
     pub fn poll_nmi(&mut self) -> bool {
+        let reg = self.reg.borrow();
+        if !reg.vblank_flag() {
+            self.nmi = false;
+            return false;
+        }
+        if !reg.vblank_nmi() {
+            return false;
+        }
         if self.nmi {
             self.nmi = false;
             true
@@ -183,7 +183,7 @@ impl PPU {
             false
         }
     }
-    pub fn start_with_memory(mem: Memory<0x4000>) -> Self {
+    pub fn start_with_memory(mem: MemoryBus<0x4000>) -> Self {
         Self {
             line: 0,
             dot: 0,
@@ -201,10 +201,10 @@ impl PPU {
     pub fn with_cartridge_memory(
         mut memory: Vec<Box<dyn MemoryRegion>>,
         mirroring: NametableMirroring,
-    ) -> Memory<0x4000> {
+    ) -> MemoryBus<0x4000> {
         memory.push(Box::new(NametableMemory::new(mirroring)));
         memory.push(Box::new(RwRam::<0x20>::with_mirrored_width(0x3F00, 0x100)));
-        Memory::construct(memory).unwrap()
+        MemoryBus::construct(memory).unwrap()
     }
 
     fn get_color(&mut self, color_idx: usize, palette_idx: usize, background: bool) -> u32 {
@@ -327,9 +327,10 @@ impl PPU {
     }
 
     fn get_pixel(&mut self) -> u32 {
+        let is_left = self.dot < 8;
         let mut pixel = self.get_base_background_color();
         let mut background_opaque = false;
-        if self.reg.borrow().render_bg() {
+        if self.reg.borrow().render_bg() && (self.reg.borrow().show_bg_left() || !is_left) {
             let background_pixel = self.get_bg_pixel();
             if (background_pixel & 0xFF000000) != 0 {
                 pixel = background_pixel;
@@ -337,11 +338,11 @@ impl PPU {
             }
         }
         let render_sprt = self.reg.borrow().render_sprt();
-        if render_sprt {
+        if render_sprt && (self.reg.borrow().show_sprt_left() || !is_left) {
             let (low_priority_pixel, sprite_0) = self.get_sprite_pixel(true);
             if low_priority_pixel & 0xFF000000 != 0 {
                 //Bug with nes means that sprite 0 collision is not detected on dot 255 of rendering
-                if sprite_0 && self.dot < 255 {
+                if sprite_0 /*&& background_opaque */&& self.dot < 255 {
                     self.reg.borrow_mut().set_sprt_hit_flag(true);
                 }
                 if !background_opaque {
@@ -379,9 +380,7 @@ impl PPU {
 
     fn vblank_start(&mut self) {
         let mut reg = self.reg.borrow_mut();
-        if reg.vblank_nmi() {
-            self.nmi = true;
-        }
+        self.nmi = true;
         reg.set_vblank_flag(true);
     }
 
@@ -405,11 +404,14 @@ impl PPU {
             self.draw_pixel();
         }
 
+        self.advance_monitor();
         if self.line == 241 && self.dot == 1 {
             self.vblank_start();
         }
 
-        self.advance_monitor();
+        if self.line == 261 && self.dot == 1 {
+            self.reg.borrow_mut().set_vblank_flag(false);
+        }
 
         self.cycle_count += 1;
     }
@@ -443,7 +445,7 @@ impl PPU {
             if (min_sprite_y..=max_sprite_y).contains(&(sprite_y)) {
                 if self.sprite_list.len() == 8 {
                     self.reg.borrow_mut().set_sprt_overflow_flag(true);
-                    continue;
+                    break;
                 }
                 self.sprite_list.push(i);
             }
@@ -506,8 +508,8 @@ impl MemoryRegion for NametableMemory {
         *self.index(rel_idx) = data;
     }
 
-    fn read(&mut self, rel_idx: usize) -> u8 {
-        *self.index(rel_idx)
+    fn read(&mut self, rel_idx: usize) -> BusBehavior {
+        BusBehavior::Set(*self.index(rel_idx))
     }
 }
 
@@ -534,6 +536,7 @@ impl MemoryRegion for PPURegistersMap {
     }
 
     fn write(&mut self, rel_idx: usize, data: u8) {
+        self.reg.borrow_mut().last_written_bus = data;
         match Self::justify_idx(rel_idx) {
             0x0000 => {
                 self.reg.borrow_mut().ppuctrl = data;
@@ -576,40 +579,48 @@ impl MemoryRegion for PPURegistersMap {
         }
     }
 
-    fn read(&mut self, rel_idx: usize) -> u8 {
+    fn read(&mut self, rel_idx: usize) -> BusBehavior {
         match Self::justify_idx(rel_idx) {
             0x0002 => {
                 let mut reg: std::cell::RefMut<'_, PPURegisters> = self.reg.borrow_mut();
                 let res = reg.ppustatus;
                 reg.t = None;
                 reg.set_vblank_flag(false);
-                res
+                reg.last_written_bus = (reg.last_written_bus & 0b0001_1111) | (res & 0b1110_0000);
+                BusBehavior::Set(reg.last_written_bus)
             }
             0x0004 => {
                 let mut reg = self.reg.borrow_mut();
 
                 reg.oamaddr = reg.oamaddr.wrapping_add(1);
-                reg.oamdata
+                BusBehavior::Set(reg.oamdata)
             }
             0x0007 => {
                 let mut reg = self.reg.borrow_mut();
                 reg.cpu_access_ppudata();
                 let old_buffer = self.ppu_data_buffer;
                 self.ppu_data_buffer = reg.ppudata;
-                old_buffer
+                if (0x3000..0x4000).contains(&reg.ppuaddr) {
+                    BusBehavior::Set(self.ppu_data_buffer)
+                } else {
+                    BusBehavior::Set(old_buffer)
+                }
             }
-            _ => 0,
+            //Should return open ppu bus not open cpu bus
+            _ => BusBehavior::Set(self.reg.borrow().last_written_bus),
         }
     }
 }
 
 pub struct PPUOamDmaRegisterMap {
     reg: Rc<RefCell<PPURegisters>>,
+    dma: Rc<RefCell<Option<Dma>>>
+
 }
 
 impl PPUOamDmaRegisterMap {
-    pub fn new(reg: Rc<RefCell<PPURegisters>>) -> Self {
-        Self { reg }
+    pub fn new(reg: Rc<RefCell<PPURegisters>>, dma: Rc<RefCell<Option<Dma>>>) -> Self {
+        Self { reg, dma }
     }
 }
 impl MemoryRegion for PPUOamDmaRegisterMap {
@@ -618,12 +629,11 @@ impl MemoryRegion for PPUOamDmaRegisterMap {
     }
 
     fn write(&mut self, _rel_idx: usize, data: u8) {
-        let mut reg = self.reg.borrow_mut();
-        reg.write_oamdma = true;
-        reg.oamdma = data;
+        self.reg.borrow_mut().last_written_bus = data;
+        *self.dma.borrow_mut() = Some(Dma::new(data, 0x2004));
     }
 
-    fn read(&mut self, _rel_idx: usize) -> u8 {
-        0
+    fn read(&mut self, _rel_idx: usize) -> BusBehavior {
+        BusBehavior::Ignore
     }
 }

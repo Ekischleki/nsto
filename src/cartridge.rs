@@ -1,7 +1,7 @@
 use std::{cell::RefCell, io::Read, iter::Map, rc::Rc};
 
 use crate::{
-    controller::Controller, cpu::CPU, memory::{DummyMem, Memory, MemoryRegion}, memory_regions::{Rom, RwRam}, ppu::PPU,
+    controller::Controller, cpu::CPU, memory::{DummyMem, MemoryBus, MemoryRegion}, memory_regions::{Rom, RwRam}, ppu::PPU,
 };
 
 pub struct Cartridge {
@@ -63,8 +63,8 @@ impl Cartridge {
 
         let controller: Rc<RefCell<Controller>> = Default::default();
 
-        let cpu_mem = CPU::with_cartridge_memory(cpu_region, &ppu, controller.clone());
-        let cpu = CPU::start_with_memory(cpu_mem);
+        let cpu = CPU::with_cartridge_memory(cpu_region, &ppu, controller.clone());
+
 
         NesDevices { cpu, ppu, controller }
     }
